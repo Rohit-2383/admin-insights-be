@@ -92,7 +92,24 @@ export interface AuthResponse {
   token: string;
 }
 
+export interface AuthTokenPayload {
+  userId: string;
+  email: string;
+  issuedAt: number;
+  expiresAt: number;
+}
+
+export interface AuthProfileUpdateInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  location: string;
+}
+
 type UnknownRecord = Record<string, unknown>;
+
+const memoryUsersById = new Map<string, UserRecord>();
+let useMemoryStore = env.databaseUrl.trim().length === 0;
 
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null;
@@ -287,6 +304,65 @@ const createAuthToken = (user: Pick<UserRecord, "id" | "email">): string => {
   return `${header}.${payload}.${signature}`;
 };
 
+export const verifyAuthToken = (token: string): AuthTokenPayload => {
+  const [header, payload, signature] = token.split(".");
+
+  if (!header || !payload || !signature) {
+    throw new ApiError(401, "Authentication token is invalid.");
+  }
+
+  const expectedSignature = createHmac("sha256", env.authTokenSecret)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+
+  const providedSignature = Buffer.from(signature);
+  const expectedSignatureBuffer = Buffer.from(expectedSignature);
+
+  if (
+    providedSignature.length !== expectedSignatureBuffer.length ||
+    !timingSafeEqual(providedSignature, expectedSignatureBuffer)
+  ) {
+    throw new ApiError(401, "Authentication token is invalid.");
+  }
+
+  try {
+    const parsedPayload = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    ) as {
+      sub?: string;
+      email?: string;
+      iat?: number;
+      exp?: number;
+    };
+
+    if (
+      typeof parsedPayload.sub !== "string" ||
+      typeof parsedPayload.email !== "string" ||
+      typeof parsedPayload.iat !== "number" ||
+      typeof parsedPayload.exp !== "number"
+    ) {
+      throw new ApiError(401, "Authentication token is invalid.");
+    }
+
+    if (parsedPayload.exp <= Math.floor(Date.now() / 1000)) {
+      throw new ApiError(401, "Authentication token has expired.");
+    }
+
+    return {
+      userId: parsedPayload.sub,
+      email: parsedPayload.email,
+      issuedAt: parsedPayload.iat,
+      expiresAt: parsedPayload.exp,
+    };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    throw new ApiError(401, "Authentication token is invalid.");
+  }
+};
+
 const mapUserRow = (row: UserRow): UserRecord => ({
   id: row.id,
   firstName: row.first_name,
@@ -318,85 +394,349 @@ const buildAuthResponse = (user: UserRecord): AuthResponse => ({
   token: createAuthToken(user),
 });
 
-const findUserByEmail = async (email: string): Promise<UserRecord | null> => {
-  await initializeDatabase();
+const isDatabaseUnavailableError = (error: unknown): boolean => {
+  const errorCode =
+    typeof error === "object" && error !== null && "code" in error
+      ? String(error.code)
+      : "";
+  const errorMessage =
+    error instanceof Error ? error.message.toLowerCase() : "";
 
-  const result = await db.query(
-    `
-      SELECT
-        id,
-        first_name,
-        last_name,
-        age,
-        email,
-        location,
-        business_type,
-        password_hash,
-        password_salt,
-        created_at,
-        updated_at
-      FROM users
-      WHERE email = $1
-      LIMIT 1
-    `,
-    [email],
+  return (
+    ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(errorCode) ||
+    errorMessage.includes("database_url is required") ||
+    errorMessage.includes("connect econrefused") ||
+    errorMessage.includes("failed to connect") ||
+    errorMessage.includes("connection terminated")
   );
+};
 
-  if (result.rows.length === 0) {
+const runWithStore = async <T>(
+  databaseAction: () => Promise<T>,
+  memoryAction: () => Promise<T> | T,
+): Promise<T> => {
+  if (useMemoryStore) {
+    return await memoryAction();
+  }
+
+  try {
+    return await databaseAction();
+  } catch (error) {
+    if (!isDatabaseUnavailableError(error)) {
+      throw error;
+    }
+
+    useMemoryStore = true;
+    return await memoryAction();
+  }
+};
+
+const findMemoryUserByEmail = (email: string): UserRecord | null => {
+  for (const user of memoryUsersById.values()) {
+    if (user.email === email) {
+      return user;
+    }
+  }
+
+  return null;
+};
+
+const findMemoryUserById = (userId: string): UserRecord | null =>
+  memoryUsersById.get(userId) ?? null;
+
+const ensureUniqueMemoryEmail = (
+  email: string,
+  excludedUserId?: string,
+): void => {
+  const existingUser = findMemoryUserByEmail(email);
+
+  if (existingUser && existingUser.id !== excludedUserId) {
+    throw new ApiError(409, "A user with this email already exists.");
+  }
+};
+
+const createMemoryUser = (
+  signupData: SignupInput,
+  passwordData: { hash: string; salt: string },
+): UserRecord => {
+  ensureUniqueMemoryEmail(signupData.email);
+
+  const user: UserRecord = {
+    id: randomUUID(),
+    firstName: signupData.firstName,
+    lastName: signupData.lastName,
+    age: signupData.age,
+    email: signupData.email,
+    location: signupData.location,
+    businessType: signupData.businessType,
+    passwordHash: passwordData.hash,
+    passwordSalt: passwordData.salt,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  memoryUsersById.set(user.id, user);
+  return user;
+};
+
+const updateMemoryUserProfile = (
+  userId: string,
+  profileData: AuthProfileUpdateInput,
+): UserRecord | null => {
+  const existingUser = findMemoryUserById(userId);
+
+  if (!existingUser) {
     return null;
   }
 
-  return mapUserRow(result.rows[0] as UserRow);
+  ensureUniqueMemoryEmail(profileData.email, userId);
+
+  const updatedUser: UserRecord = {
+    ...existingUser,
+    ...profileData,
+    updatedAt: new Date(),
+  };
+
+  memoryUsersById.set(userId, updatedUser);
+  return updatedUser;
 };
+
+const updateMemoryUserPassword = (
+  userId: string,
+  passwordData: { hash: string; salt: string },
+): UserRecord | null => {
+  const existingUser = findMemoryUserById(userId);
+
+  if (!existingUser) {
+    return null;
+  }
+
+  const updatedUser: UserRecord = {
+    ...existingUser,
+    passwordHash: passwordData.hash,
+    passwordSalt: passwordData.salt,
+    updatedAt: new Date(),
+  };
+
+  memoryUsersById.set(userId, updatedUser);
+  return updatedUser;
+};
+
+const deleteMemoryUser = (userId: string): boolean => memoryUsersById.delete(userId);
+
+const findUserByEmail = async (email: string): Promise<UserRecord | null> =>
+  runWithStore(async () => {
+    await initializeDatabase();
+
+    const result = await db.query(
+      `
+        SELECT
+          id,
+          first_name,
+          last_name,
+          age,
+          email,
+          location,
+          business_type,
+          password_hash,
+          password_salt,
+          created_at,
+          updated_at
+        FROM users
+        WHERE email = $1
+        LIMIT 1
+      `,
+      [email],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapUserRow(result.rows[0] as UserRow);
+  }, () => findMemoryUserByEmail(email));
+
+const findUserById = async (userId: string): Promise<UserRecord | null> =>
+  runWithStore(async () => {
+    await initializeDatabase();
+
+    const result = await db.query(
+      `
+        SELECT
+          id,
+          first_name,
+          last_name,
+          age,
+          email,
+          location,
+          business_type,
+          password_hash,
+          password_salt,
+          created_at,
+          updated_at
+        FROM users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapUserRow(result.rows[0] as UserRow);
+  }, () => findMemoryUserById(userId));
 
 const createUser = async (
   signupData: SignupInput,
   passwordData: { hash: string; salt: string },
-): Promise<UserRecord> => {
-  await initializeDatabase();
+): Promise<UserRecord> =>
+  runWithStore(async () => {
+    await initializeDatabase();
 
-  const result = await db.query(
-    `
-      INSERT INTO users (
-        id,
-        first_name,
-        last_name,
-        age,
-        email,
-        location,
-        business_type,
-        password_hash,
-        password_salt
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING
-        id,
-        first_name,
-        last_name,
-        age,
-        email,
-        location,
-        business_type,
-        password_hash,
-        password_salt,
-        created_at,
-        updated_at
-    `,
-    [
-      randomUUID(),
-      signupData.firstName,
-      signupData.lastName,
-      signupData.age,
-      signupData.email,
-      signupData.location,
-      signupData.businessType,
-      passwordData.hash,
-      passwordData.salt,
-    ],
-  );
+    const result = await db.query(
+      `
+        INSERT INTO users (
+          id,
+          first_name,
+          last_name,
+          age,
+          email,
+          location,
+          business_type,
+          password_hash,
+          password_salt
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING
+          id,
+          first_name,
+          last_name,
+          age,
+          email,
+          location,
+          business_type,
+          password_hash,
+          password_salt,
+          created_at,
+          updated_at
+      `,
+      [
+        randomUUID(),
+        signupData.firstName,
+        signupData.lastName,
+        signupData.age,
+        signupData.email,
+        signupData.location,
+        signupData.businessType,
+        passwordData.hash,
+        passwordData.salt,
+      ],
+    );
 
-  return mapUserRow(result.rows[0] as UserRow);
-};
+    return mapUserRow(result.rows[0] as UserRow);
+  }, () => createMemoryUser(signupData, passwordData));
+
+const updateUserProfileRecord = async (
+  userId: string,
+  profileData: AuthProfileUpdateInput,
+): Promise<UserRecord | null> =>
+  runWithStore(async () => {
+    await initializeDatabase();
+
+    const result = await db.query(
+      `
+        UPDATE users
+        SET
+          first_name = $2,
+          last_name = $3,
+          email = $4,
+          location = $5,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+          id,
+          first_name,
+          last_name,
+          age,
+          email,
+          location,
+          business_type,
+          password_hash,
+          password_salt,
+          created_at,
+          updated_at
+      `,
+      [
+        userId,
+        profileData.firstName,
+        profileData.lastName,
+        profileData.email,
+        profileData.location,
+      ],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapUserRow(result.rows[0] as UserRow);
+  }, () => updateMemoryUserProfile(userId, profileData));
+
+const updateUserPasswordRecord = async (
+  userId: string,
+  passwordData: { hash: string; salt: string },
+): Promise<UserRecord | null> =>
+  runWithStore(async () => {
+    await initializeDatabase();
+
+    const result = await db.query(
+      `
+        UPDATE users
+        SET
+          password_hash = $2,
+          password_salt = $3,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+          id,
+          first_name,
+          last_name,
+          age,
+          email,
+          location,
+          business_type,
+          password_hash,
+          password_salt,
+          created_at,
+          updated_at
+      `,
+      [userId, passwordData.hash, passwordData.salt],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return mapUserRow(result.rows[0] as UserRow);
+  }, () => updateMemoryUserPassword(userId, passwordData));
+
+const deleteUserRecord = async (userId: string): Promise<boolean> =>
+  runWithStore(async () => {
+    await initializeDatabase();
+
+    const result = await db.query(
+      `
+        DELETE FROM users
+        WHERE id = $1
+        RETURNING id
+      `,
+      [userId],
+    );
+
+    return result.rows.length > 0;
+  }, () => deleteMemoryUser(userId));
 
 export const getBusinessTypes = (): BusinessTypeOption[] =>
   BUSINESS_TYPES.map((businessType) => ({
@@ -450,4 +790,72 @@ export const login = async (payload: unknown): Promise<AuthResponse> => {
   }
 
   return buildAuthResponse(user);
+};
+
+export const getCurrentUser = async (userId: string): Promise<AuthUser | null> => {
+  const user = await findUserById(userId);
+  return user ? serializeUser(user) : null;
+};
+
+export const updateCurrentUserProfile = async (
+  userId: string,
+  profileData: AuthProfileUpdateInput,
+): Promise<AuthUser> => {
+  try {
+    const updatedUser = await updateUserProfileRecord(userId, profileData);
+
+    if (!updatedUser) {
+      throw new ApiError(404, "User not found.");
+    }
+
+    return serializeUser(updatedUser);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "23505"
+    ) {
+      throw new ApiError(409, "A user with this email already exists.");
+    }
+
+    throw error;
+  }
+};
+
+export const changePassword = async (
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> => {
+  const user = await findUserById(userId);
+
+  if (!user) {
+    throw new ApiError(404, "User not found.");
+  }
+
+  const isCurrentPasswordValid = await verifyPassword(
+    currentPassword,
+    user.passwordSalt,
+    user.passwordHash,
+  );
+
+  if (!isCurrentPasswordValid) {
+    throw new ApiError(400, "Current password is incorrect.");
+  }
+
+  const nextPasswordData = await hashPassword(newPassword);
+  const updatedUser = await updateUserPasswordRecord(userId, nextPasswordData);
+
+  if (!updatedUser) {
+    throw new ApiError(404, "User not found.");
+  }
+};
+
+export const deleteAccount = async (userId: string): Promise<void> => {
+  const deleted = await deleteUserRecord(userId);
+
+  if (!deleted) {
+    throw new ApiError(404, "User not found.");
+  }
 };

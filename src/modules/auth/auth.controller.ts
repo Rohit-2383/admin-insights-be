@@ -1,14 +1,16 @@
 import { type Request, type Response } from "express";
 import { asyncHandler } from "../../middlewares/error.middleware";
+import { sendSuccess } from "../../utils/http";
 import * as authService from "./auth.service";
 
 export const getBusinessTypes = asyncHandler(
   async (_req: Request, res: Response): Promise<void> => {
-    res.status(200).json({
-      success: true,
-      message: "Business types fetched successfully.",
-      data: authService.getBusinessTypes(),
-    });
+    sendSuccess(
+      res,
+      200,
+      "Business types fetched successfully.",
+      authService.getBusinessTypes(),
+    );
   },
 );
 
@@ -16,11 +18,7 @@ export const signup = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const authResponse = await authService.signup(req.body);
 
-    res.status(201).json({
-      success: true,
-      message: "User registered successfully.",
-      data: authResponse,
-    });
+    sendSuccess(res, 201, "User registered successfully.", authResponse);
   },
 );
 
@@ -28,10 +26,12 @@ export const login = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     const authResponse = await authService.login(req.body);
 
-    res.status(200).json({
-      success: true,
-      message: "Login successful.",
-      data: authResponse,
-    });
+    sendSuccess(res, 200, "Login successful.", authResponse);
+  },
+);
+
+export const me = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    sendSuccess(res, 200, "Current user fetched successfully.", req.authUser!);
   },
 );
