@@ -1,6 +1,6 @@
 import { type Request, type Response } from "express";
-import { asyncHandler } from "../../middlewares/error.middleware";
-import { sendSuccess } from "../../utils/http";
+import { asyncHandler } from "../../../middlewares/error.middleware";
+import { sendSuccess } from "../../../utils/http";
 import * as settingsService from "./settings.service";
 
 const getAuthenticatedUser = (req: Request) => req.authUser!;
