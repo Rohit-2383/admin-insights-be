@@ -1,12 +1,11 @@
 import { Router } from "express";
-import { requireAuth } from "../../middlewares/auth.middleware";
-import { getBusinessTypes, login, me, signup } from "./auth.controller";
+import { login, me, register } from "./auth.controller";
+import { requireAuth } from "./auth.middleware";
 
 const authRouter = Router();
 
-authRouter.get("/business-types", getBusinessTypes);
-authRouter.get("/me", requireAuth, me);
-authRouter.post("/signup", signup);
+authRouter.post("/register", register);
 authRouter.post("/login", login);
+authRouter.get("/me", requireAuth, me);
 
 export default authRouter;
