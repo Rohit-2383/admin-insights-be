@@ -1,6 +1,15 @@
+import { Types } from "mongoose";
 import { ApiError } from "../middlewares/error.middleware";
 
 export type UnknownRecord = Record<string, unknown>;
+
+export const assertObjectId = (value: string, label = "id"): string => {
+  if (!Types.ObjectId.isValid(value)) {
+    throw new ApiError(400, `${label} is not a valid id.`);
+  }
+
+  return value;
+};
 
 export const assertRecord = (
   value: unknown,

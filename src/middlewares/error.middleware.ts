@@ -5,6 +5,7 @@ import type {
   RequestHandler,
   Response,
 } from "express";
+import mongoose from "mongoose";
 
 export class ApiError extends Error {
   public readonly statusCode: number;
@@ -58,18 +59,39 @@ export const errorHandler: ErrorRequestHandler = (
     return;
   }
 
+  if (error instanceof mongoose.Error.ValidationError) {
+    res.status(400).json({
+      success: false,
+      message: "Validation failed.",
+      details: Object.values(error.errors).map((e) => e.message),
+    });
+    return;
+  }
+
+  if (error instanceof mongoose.Error.CastError) {
+    res.status(400).json({
+      success: false,
+      message: `Invalid value for field '${error.path}'.`,
+    });
+    return;
+  }
+
   if (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    error.code === "23505"
+    (error as { code?: unknown }).code === 11000
   ) {
+    const keyValue = (error as { keyValue?: Record<string, unknown> }).keyValue;
     res.status(409).json({
       success: false,
       message: "A record with this value already exists.",
+      details: keyValue,
     });
     return;
   }
+
+  console.error("[error]", error);
 
   const message =
     error instanceof Error ? error.message : "Something went wrong.";

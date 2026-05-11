@@ -3,11 +3,10 @@ import { asyncHandler } from "../../middlewares/error.middleware";
 import { sendSuccess } from "../../utils/http";
 import * as productsService from "./products.service";
 
-const parseProductId = (value: string | string[] | undefined): number =>
-  Number.parseInt(
-    Array.isArray(value) ? (value[0] ?? "") : (value ?? ""),
-    10,
-  );
+const getProductId = (req: Request): string =>
+  Array.isArray(req.params.productId)
+    ? (req.params.productId[0] ?? "")
+    : (req.params.productId ?? "");
 
 export const getProductsDashboardData = asyncHandler(
   async (_req: Request, res: Response): Promise<void> => {
@@ -15,7 +14,18 @@ export const getProductsDashboardData = asyncHandler(
       res,
       200,
       "Products dashboard data fetched successfully.",
-      productsService.getProductsDashboardData(),
+      await productsService.getProductsDashboardData(),
+    );
+  },
+);
+
+export const createProduct = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    sendSuccess(
+      res,
+      201,
+      "Product created successfully.",
+      await productsService.createProduct(req.body),
     );
   },
 );
@@ -26,14 +36,14 @@ export const updateProduct = asyncHandler(
       res,
       200,
       "Product updated successfully.",
-      productsService.updateProduct(parseProductId(req.params.productId), req.body),
+      await productsService.updateProduct(getProductId(req), req.body),
     );
   },
 );
 
 export const deleteProduct = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    productsService.deleteProduct(parseProductId(req.params.productId));
+    await productsService.deleteProduct(getProductId(req));
     sendSuccess(res, 200, "Product deleted successfully.", { deleted: true });
   },
 );
