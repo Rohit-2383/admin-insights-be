@@ -1,28 +1,39 @@
-import { Schema, model, type HydratedDocument, type Model } from "mongoose";
 import bcrypt from "bcryptjs";
+import { Schema, model, type HydratedDocument, type Model } from "mongoose";
 import { env } from "../../config/env";
+import { BUSINESS_TYPES, type BusinessType, type UserRole } from "./auth.types";
 
 export interface AuthUserAttrs {
-  email: string;
-  passwordHash: string;
   firstName: string;
   lastName: string;
+  age: number;
+  email: string;
   location: string;
-  role: "admin" | "user";
+  businessType: BusinessType;
+  passwordHash: string;
+  role: UserRole;
 }
 
 export interface AuthUserMethods {
   comparePassword(plain: string): Promise<boolean>;
 }
 
-export interface AuthUserModel extends Model<AuthUserAttrs, Record<string, never>, AuthUserMethods> {
+export interface AuthUserModelType
+  extends Model<AuthUserAttrs, Record<string, never>, AuthUserMethods> {
   hashPassword(plain: string): Promise<string>;
 }
 
 export type AuthUserDocument = HydratedDocument<AuthUserAttrs, AuthUserMethods>;
 
-const authUserSchema = new Schema<AuthUserAttrs, AuthUserModel, AuthUserMethods>(
+const authUserSchema = new Schema<
+  AuthUserAttrs,
+  AuthUserModelType,
+  AuthUserMethods
+>(
   {
+    firstName: { type: String, required: true, trim: true },
+    lastName: { type: String, required: true, trim: true },
+    age: { type: Number, required: true, min: 1 },
     email: {
       type: String,
       required: true,
@@ -31,19 +42,23 @@ const authUserSchema = new Schema<AuthUserAttrs, AuthUserModel, AuthUserMethods>
       trim: true,
       index: true,
     },
+    location: { type: String, required: true, trim: true },
+    businessType: {
+      type: String,
+      enum: BUSINESS_TYPES,
+      required: true,
+    },
     passwordHash: { type: String, required: true, select: false },
-    firstName: { type: String, required: true, trim: true },
-    lastName: { type: String, required: true, trim: true },
-    location: { type: String, default: "", trim: true },
     role: { type: String, enum: ["admin", "user"], default: "admin" },
   },
   {
     timestamps: true,
     toJSON: {
+      virtuals: true,
+      versionKey: false,
       transform: (_doc, ret) => {
         ret.id = ret._id;
         delete ret._id;
-        delete ret.__v;
         delete ret.passwordHash;
         return ret;
       },
@@ -51,12 +66,19 @@ const authUserSchema = new Schema<AuthUserAttrs, AuthUserModel, AuthUserMethods>
   },
 );
 
-authUserSchema.methods.comparePassword = function (plain: string): Promise<boolean> {
+authUserSchema.methods.comparePassword = function (
+  plain: string,
+): Promise<boolean> {
   return bcrypt.compare(plain, this.passwordHash);
 };
 
-authUserSchema.statics.hashPassword = function (plain: string): Promise<string> {
+authUserSchema.statics.hashPassword = function (
+  plain: string,
+): Promise<string> {
   return bcrypt.hash(plain, env.bcryptSaltRounds);
 };
 
-export const AuthUserModel = model<AuthUserAttrs, AuthUserModel>("AuthUser", authUserSchema);
+export const AuthUserModel = model<AuthUserAttrs, AuthUserModelType>(
+  "AuthUser",
+  authUserSchema,
+);

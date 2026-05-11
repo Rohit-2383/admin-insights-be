@@ -20,7 +20,7 @@ export const requireAuth = asyncHandler(
   async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     const token = extractBearerToken(req.headers.authorization);
     const payload = authService.verifyAuthToken(token);
-    const user = await authService.getCurrentUser(payload.userId);
+    const user = await authService.getCurrentUser(payload.sub);
 
     if (!user) {
       throw new ApiError(401, "Authentication token is invalid.");

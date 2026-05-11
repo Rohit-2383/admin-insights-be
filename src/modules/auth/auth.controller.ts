@@ -3,15 +3,36 @@ import { asyncHandler } from "../../middlewares/error.middleware";
 import { sendSuccess } from "../../utils/http";
 import * as authService from "./auth.service";
 
-export const register = asyncHandler(
+export const getBusinessTypes = asyncHandler(
+  async (_req: Request, res: Response): Promise<void> => {
+    sendSuccess(
+      res,
+      200,
+      "Business types fetched successfully.",
+      authService.getBusinessTypes(),
+    );
+  },
+);
+
+export const signup = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    sendSuccess(res, 201, "Account created successfully.", await authService.register(req.body));
+    sendSuccess(
+      res,
+      201,
+      "Account created successfully.",
+      await authService.signup(req.body),
+    );
   },
 );
 
 export const login = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    sendSuccess(res, 200, "Login successful.", await authService.login(req.body));
+    sendSuccess(
+      res,
+      200,
+      "Login successful.",
+      await authService.login(req.body),
+    );
   },
 );
 
