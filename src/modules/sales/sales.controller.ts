@@ -9,7 +9,7 @@ export const getSalesDashboardData = asyncHandler(
       res,
       200,
       "Sales dashboard data fetched successfully.",
-      salesService.getSalesDashboardData(req.query.range),
+      await salesService.getSalesDashboardData(req.query.range),
     );
   },
 );
