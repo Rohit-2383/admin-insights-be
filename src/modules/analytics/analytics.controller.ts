@@ -9,7 +9,7 @@ export const getAnalyticsDashboardData = asyncHandler(
       res,
       200,
       "Analytics dashboard data fetched successfully.",
-      analyticsService.getAnalyticsDashboardData(req.query.range),
+      await analyticsService.getAnalyticsDashboardData(req.query.range),
     );
   },
 );

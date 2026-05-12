@@ -9,7 +9,7 @@ export const getOverviewPageData = asyncHandler(
       res,
       200,
       "Overview dashboard data fetched successfully.",
-      overviewService.getOverviewPageData(),
+      await overviewService.getOverviewPageData(),
     );
   },
 );
