@@ -1,13 +1,13 @@
 import { type Request, type Response } from "express";
-import { asyncHandler } from "../../../middlewares/error.middleware";
-import { sendSuccess } from "../../../utils/http";
+import { asyncHandler } from "../../middlewares/error.middleware";
+import { sendSuccess } from "../../utils/http";
 import * as settingsService from "./settings.service";
 
 const getAuthenticatedUser = (req: Request) => req.authUser!;
 const getAccountId = (req: Request): string =>
   Array.isArray(req.params.accountId)
     ? (req.params.accountId[0] ?? "")
-    : req.params.accountId ?? "";
+    : (req.params.accountId ?? "");
 
 export const getSettingsPageData = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
@@ -15,7 +15,7 @@ export const getSettingsPageData = asyncHandler(
       res,
       200,
       "Settings data fetched successfully.",
-      settingsService.getSettingsPageData(getAuthenticatedUser(req)),
+      await settingsService.getSettingsPageData(getAuthenticatedUser(req)),
     );
   },
 );
@@ -37,7 +37,10 @@ export const updateNotifications = asyncHandler(
       res,
       200,
       "Notification preferences updated successfully.",
-      settingsService.updateNotifications(getAuthenticatedUser(req), req.body),
+      await settingsService.updateNotifications(
+        getAuthenticatedUser(req),
+        req.body,
+      ),
     );
   },
 );
@@ -48,7 +51,10 @@ export const updateSecurity = asyncHandler(
       res,
       200,
       "Security preferences updated successfully.",
-      settingsService.updateSecurity(getAuthenticatedUser(req), req.body),
+      await settingsService.updateSecurity(
+        getAuthenticatedUser(req),
+        req.body,
+      ),
     );
   },
 );
@@ -70,7 +76,7 @@ export const updateConnectedAccount = asyncHandler(
       res,
       200,
       "Connected account updated successfully.",
-      settingsService.updateConnectedAccount(
+      await settingsService.updateConnectedAccount(
         getAuthenticatedUser(req),
         getAccountId(req),
         req.body,
