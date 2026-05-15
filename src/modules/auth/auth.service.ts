@@ -48,7 +48,7 @@ const signToken = (user: Pick<AuthUser, "id" | "email" | "role">): string => {
     role: user.role,
   };
   const options: SignOptions = {
-    expiresIn: env.jwtExpiresIn as SignOptions["expiresIn"],
+    expiresIn: env.jwtExpiresIn as NonNullable<SignOptions["expiresIn"]>,
   };
 
   return jwt.sign(payload, env.jwtSecret, options);

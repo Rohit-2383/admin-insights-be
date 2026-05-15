@@ -37,7 +37,7 @@ const dashboardUserSchema = new Schema<DashboardUserAttrs>(
     toJSON: {
       virtuals: true,
       versionKey: false,
-      transform: (_doc, ret) => {
+      transform: (_doc, ret: Record<string, unknown>) => {
         ret.id = ret._id;
         delete ret._id;
         return ret;
